@@ -29,7 +29,7 @@
             formData.append('file', file);
             formData.append('password', pw);
 
-            const res = await fetch('/api/convert', { method: 'POST', body: formData });
+            const res = await fetch('/api', { method: 'POST', body: formData });
             if(res.ok) {
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
