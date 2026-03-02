@@ -1,32 +1,40 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 import msoffcrypto
 import pandas as pd
 import io
-import os
 
 app = Flask(__name__)
 CORS(app)
 
-@app.route('/api/convert', methods=['POST'])
+@app.route('/api', methods=['POST'])
 def convert():
-    if 'file' not in request.files:
-        return {"error": "파일이 없습니다."}, 400
-    
-    file = request.files['file']
-    password = request.form.get('password', '')
-    
     try:
-        # 1. 암호 해제
-        decrypted_ptr = io.BytesIO()
-        ms_file = msoffcrypto.OfficeFile(file)
-        ms_file.load_key(password=password)
-        ms_file.decrypt(decrypted_ptr)
+        if 'file' not in request.files:
+            return jsonify({"error": "파일이 업로드되지 않았습니다."}), 400
         
-        # 2. 데이터 읽기 및 변환
+        file = request.files['file']
+        password = request.form.get('password', '')
+        
+        # 1. 암호 해제 시도
+        decrypted_ptr = io.BytesIO()
+        try:
+            ms_file = msoffcrypto.OfficeFile(file)
+            ms_file.load_key(password=password)
+            ms_file.decrypt(decrypted_ptr)
+        except Exception as e:
+            return jsonify({"error": f"비밀번호가 틀렸거나 암호 해제에 실패했습니다: {str(e)}"}), 403
+        
+        # 2. 데이터 읽기
         df = pd.read_excel(decrypted_ptr)
         
-        # 3. 우체국 양식 매핑 (사용자가 준 템플릿 기준)
+        # 3. 필수 컬럼 확인 (디버깅용)
+        required_cols = ["수취인명", "우편번호", "기본배송지", "상세배송지", "상품명"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            return jsonify({"error": f"엑셀에 다음 항목이 없습니다: {', '.join(missing_cols)}"}), 400
+
+        # 4. 우체국 양식 매핑
         post_df = pd.DataFrame({
             "받는 분": df["수취인명"],
             "우편번호": df["우편번호"],
@@ -43,7 +51,6 @@ def convert():
             "분할접수 여부(Y/N)": "N"
         })
 
-        # 4. 메모리에서 엑셀 생성
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             post_df.to_excel(writer, index=False)
@@ -57,8 +64,5 @@ def convert():
         )
 
     except Exception as e:
-        return {"error": str(e)}, 500
-
-# Vercel 환경을 위한 핸들러
-def handler(request):
-    return app(request)
+        # 모든 에러를 화면에 뿌려줍니다.
+        return jsonify({"error": f"서버 내부 오류: {str(e)}"}), 500
