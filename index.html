@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>네이버 ➔ 우체국 엑셀 변환기</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; background: #f9f9f9; }
+        .box { background: white; padding: 30px; border-radius: 15px; display: inline-block; shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .ad-space { margin: 20px 0; background: #eee; height: 100px; line-height: 100px; color: #999; } /* 광고 자리 */
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>📮 우체국 엑셀 변환기</h2>
+        <div class="ad-space">여기에 구글 광고가 들어갈 예정입니다</div>
+        
+        <input type="file" id="fileInput"><br><br>
+        <input type="password" id="pwInput" placeholder="네이버 엑셀 비번"><br><br>
+        <button onclick="uploadFile()">변환하기</button>
+    </div>
+
+    <script>
+        async function uploadFile() {
+            const file = document.getElementById('fileInput').files[0];
+            const pw = document.getElementById('pwInput').value;
+            if(!file) return alert("파일 선택!");
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('password', pw);
+
+            const res = await fetch('/api/convert', { method: 'POST', body: formData });
+            if(res.ok) {
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = "우체국_변환완료.xlsx";
+                document.body.appendChild(a); a.click();
+            } else {
+                alert("비밀번호를 확인해주세요!");
+            }
+        }
+    </script>
+</body>
+</html>
