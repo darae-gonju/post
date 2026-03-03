@@ -61,20 +61,41 @@ def convert():
         df = df.reset_index(drop=True)
         num_rows = len(df)
 
-        # 3. 데이터 추출 및 정제
+        # 3. 데이터 추출 및 전화번호 로직 강화
         names = get_col_safe(df, "수취인명", num_rows)
         zips = get_col_safe(df, "우편번호", num_rows)
         addr1 = get_col_safe(df, "기본배송지", num_rows)
         addr2 = get_col_safe(df, "상세배송지", num_rows).apply(lambda x: "." if not x or x.strip() == "" else x)
         
-        # [수정] 5행 일반전화: 010으로 시작하면 강제로 비움
-        tel_home = get_col_safe(df, "수취인연락처2", num_rows)
-        tel_home = tel_home.apply(lambda x: "" if x.startswith("010") else x)
+        # 네이버 연락처1, 연락처2 수집
+        raw_tel1 = get_col_safe(df, "수취인연락처1", num_rows)
+        raw_tel2 = get_col_safe(df, "수취인연락처2", num_rows)
+
+        final_tel_home = []   # 5열: 일반전화
+        final_tel_mobile = [] # 6열: 휴대전화
+
+        for i in range(num_rows):
+            t1 = raw_tel1[i].replace("-", "").strip()
+            t2 = raw_tel2[i].replace("-", "").strip()
+            
+            # 휴대폰 번호(010) 추출 로직
+            if t1.startswith("010"):
+                mobile = t1
+                home = t2 if not t2.startswith("010") else ""
+            elif t2.startswith("010"):
+                mobile = t2
+                home = t1 if not t1.startswith("010") else ""
+            else:
+                # 둘 다 010이 아닌 경우
+                mobile = ""
+                home = t1
+            
+            final_tel_home.append(home)
+            final_tel_mobile.append(mobile)
         
-        tel_mobile = get_col_safe(df, "수취인연락처1", num_rows) # 휴대전화
         product = get_col_safe(df, "상품명", num_rows).str.slice(0, 20)
         
-        # [수정] 12행 배송메세지: 특수기호 삭제
+        # 12행 배송메세지: 특수기호 삭제
         memo = get_col_safe(df, "배송메세지", num_rows)
         memo = memo.apply(remove_special_chars)
 
@@ -86,14 +107,14 @@ def convert():
                 zips[i],                # 2: 우편번호
                 addr1[i],               # 3: 주소
                 addr2[i],               # 4: 상세주소
-                tel_home[i],            # 5: 일반전화 (010 제거됨)
-                tel_mobile[i],          # 6: 휴대전화
+                final_tel_home[i],      # 5: 일반전화 (010 절대 없음)
+                final_tel_mobile[i],    # 6: 휴대전화 (010만 들어감)
                 "3",                    # 7: 중량
                 "80",                   # 8: 부피
                 "농/수/축산물(일반)",   # 9: 내용품코드
                 product[i],             # 10: 내용물 (상품명)
                 "미신청",               # 11: 배달방식
-                memo[i],                # 12: 배송시요청사항 (특수기호 제거됨)
+                memo[i],                # 12: 배송시요청사항 (특수기호 제거)
                 "N",                    # 13: 분할접수 여부
                 "", "", "", ""          # 14~17: 빈칸
             ]
@@ -109,8 +130,11 @@ def convert():
             output,
             mimetype='text/plain',
             as_attachment=True,
-            download_name=f"post_upload_fixed.txt"
+            download_name=f"post_office_fixed.txt"
         )
+
+    except Exception as e:
+        return jsonify({"error": f"서버 오류: {str(e)}"}), 500
 
     except Exception as e:
         return jsonify({"error": f"서버 오류: {str(e)}"}), 500
