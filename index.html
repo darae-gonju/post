@@ -5,82 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>스마트스토어 ➔ 우체국 TXT 변환기</title>
     <style>
-        :root {
-            --primary-color: #e61919; /* 우체국 느낌의 레드 */
-            --success-color: #28a745;
-            --bg-color: #f4f7f6;
-        }
-        body {
-            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
-            background-color: var(--bg-color);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .container {
-            background: white;
-            padding: 2.5rem;
-            border-radius: 20px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
-        }
+        :root { --primary-color: #e61919; --bg-color: #f4f7f6; }
+        body { font-family: 'Pretendard', sans-serif; background-color: var(--bg-color); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { background: white; padding: 2.5rem; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 420px; text-align: center; }
         h2 { color: #333; margin-bottom: 0.5rem; }
-        p { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
-        
-        .input-group {
-            text-align: left;
-            margin-bottom: 1.5rem;
-        }
-        label {
-            display: block;
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: #555;
-        }
-        input[type="file"], input[type="password"] {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            box-sizing: border-box;
-            transition: border-color 0.3s;
-        }
-        input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        .btn {
-            width: 100%;
-            padding: 14px;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        .btn:hover { background-color: #b31414; }
-        .footer-info {
-            margin-top: 1.5rem;
-            font-size: 0.8rem;
-            color: #999;
-            line-height: 1.5;
-        }
-        .loading { display: none; margin-top: 10px; color: var(--primary-color); font-weight: bold; }
+        .input-group { text-align: left; margin-bottom: 1.2rem; }
+        label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; color: #555; }
+        input, select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 14px; }
+        .btn { width: 100%; padding: 14px; background-color: var(--primary-color); color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+        .footer-info { margin-top: 1.5rem; font-size: 0.8rem; color: #999; line-height: 1.5; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h2>📮 우체국 TXT 변환</h2>
-    <p>스마트스토어 주문서를 우체국 전용<br><strong>텍스트(파이프 분리)</strong> 양식으로 변환합니다.</p>
+    <p>네이버 주문서를 우체국 양식으로 변환합니다.</p>
 
     <div class="input-group">
         <label>1. 네이버 엑셀 파일 업로드</label>
@@ -88,17 +28,30 @@
     </div>
 
     <div class="input-group">
-        <label>2. 비밀번호 입력 (숫자)</label>
-        <input type="password" id="pwInput" placeholder="휴대폰 번호 등 숫자 비밀번호" onkeydown="if(event.keyCode==13) uploadFile()">
+        <label>2. 품목 카테고리 선택</label>
+        <select id="itemTypeSelect">
+            <option value="농/수/축산물(일반)">농/수/축산물(일반)</option>
+            <option value="농/수/축산물(냉동,냉장)">농/수/축산물(냉동,냉장)</option>
+            <option value="전자제품">전자제품</option>
+            <option value="서적">서적</option>
+            <option value="의류/패션잡화">의류/패션잡화</option>
+            <option value="미용/화장품">미용/화장품</option>
+            <option value="의료/건강식품">의료/건강식품</option>
+            <option value="생활용품">생활용품</option>
+        </select>
+    </div>
+
+    <div class="input-group">
+        <label>3. 비밀번호 입력 (숫자)</label>
+        <input type="password" id="pwInput" placeholder="휴대폰 번호 등 숫자 비밀번호">
     </div>
 
     <button class="btn" onclick="uploadFile()" id="submitBtn">변환 및 TXT 다운로드</button>
-    <div id="loading" class="loading">변환 중입니다...</div>
+    <div id="loading" style="display:none; margin-top:10px; color:#e61919;">처리 중...</div>
 
     <div class="footer-info">
-        <strong>[우체국 업로드 방법]</strong><br>
-        파일 불러오기 시 형식을 <br><strong>'텍스트(파이프로 분리)(*.txt)'</strong>로 선택하세요.<br><br>
-        보안 안내: 파일은 변환 즉시 삭제됩니다.
+        업로드 형식: <strong>텍스트(파이프로 분리)(*.txt)</strong><br>
+        5열: 일반전화(010 제외) / 6열: 휴대폰(010, 050)
     </div>
 </div>
 
@@ -106,55 +59,40 @@
     async function uploadFile() {
         const fileInput = document.getElementById('fileInput');
         const pwInput = document.getElementById('pwInput');
+        const itemTypeSelect = document.getElementById('itemTypeSelect');
         const submitBtn = document.getElementById('submitBtn');
-        const loading = document.getElementById('loading');
 
-        const file = fileInput.files[0];
-        const pw = pwInput.value;
-
-        if(!file) return alert("네이버에서 받은 엑셀 파일을 선택해주세요!");
-        if(!pw) return alert("비밀번호를 입력해주세요!");
+        if(!fileInput.files[0]) return alert("파일을 선택해주세요!");
+        if(!pwInput.value) return alert("비밀번호를 입력해주세요!");
 
         submitBtn.disabled = true;
-        submitBtn.innerText = "처리 중...";
-        loading.style.display = "block";
+        document.getElementById('loading').style.display = "block";
 
         const formData = new FormData();
-        formData.append('file', file);
-        formData.append('password', pw);
+        formData.append('file', fileInput.files[0]);
+        formData.append('password', pwInput.value);
+        formData.append('itemType', itemTypeSelect.value);
 
         try {
-            const res = await fetch('/api', { 
-                method: 'POST', 
-                body: formData 
-            });
-
+            const res = await fetch('/api', { method: 'POST', body: formData });
             if(res.ok) {
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                
-                const today = new Date().toISOString().slice(5, 10).replace('-', '');
-                // 핵심 수정 사항: 확장자를 .txt로 변경
-                a.download = `우체국_업로드_${today}.txt`; 
-                
-                document.body.appendChild(a);
+                a.download = `우체국_업로드_${new Date().getTime()}.txt`;
                 a.click();
-                window.URL.revokeObjectURL(url);
             } else {
-                const errorData = await res.json();
-                alert("오류: " + (errorData.error || "비밀번호를 확인해주세요."));
+                const err = await res.json();
+                alert("오류: " + err.error);
             }
-        } catch (err) {
-            alert("서버 연결에 실패했습니다.");
+        } catch (e) {
+            alert("서버 연결 실패");
         } finally {
             submitBtn.disabled = false;
-            submitBtn.innerText = "변환 및 TXT 다운로드";
-            loading.style.display = "none";
+            document.getElementById('loading').style.display = "none";
         }
     }
 </script>
-
 </body>
 </html>
