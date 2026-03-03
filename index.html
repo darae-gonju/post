@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>스마트스토어 ➔ 우체국 엑셀 변환기</title>
+    <title>스마트스토어 ➔ 우체국 TXT 변환기</title>
     <style>
         :root {
-            --primary-color: #007bff;
+            --primary-color: #e61919; /* 우체국 느낌의 레드 */
             --success-color: #28a745;
             --bg-color: #f4f7f6;
         }
@@ -66,7 +66,7 @@
             cursor: pointer;
             transition: background 0.3s;
         }
-        .btn:hover { background-color: #0056b3; }
+        .btn:hover { background-color: #b31414; }
         .footer-info {
             margin-top: 1.5rem;
             font-size: 0.8rem;
@@ -79,8 +79,8 @@
 <body>
 
 <div class="container">
-    <h2>📮 우체국 엑셀 변환</h2>
-    <p>스마트스토어 주문서를<br>우체국 양식으로 1초 만에 변환하세요.</p>
+    <h2>📮 우체국 TXT 변환</h2>
+    <p>스마트스토어 주문서를 우체국 전용<br><strong>텍스트(파이프 분리)</strong> 양식으로 변환합니다.</p>
 
     <div class="input-group">
         <label>1. 네이버 엑셀 파일 업로드</label>
@@ -92,12 +92,13 @@
         <input type="password" id="pwInput" placeholder="휴대폰 번호 등 숫자 비밀번호" onkeydown="if(event.keyCode==13) uploadFile()">
     </div>
 
-    <button class="btn" onclick="uploadFile()" id="submitBtn">변환 및 다운로드</button>
+    <button class="btn" onclick="uploadFile()" id="submitBtn">변환 및 TXT 다운로드</button>
     <div id="loading" class="loading">변환 중입니다...</div>
 
     <div class="footer-info">
-        보안 안내: 업로드된 파일은 서버에 저장되지 않으며<br>변환 즉시 메모리에서 삭제됩니다.<br>
-        <strong>* 숫자 비밀번호 환경에 최적화되어 있습니다.</strong>
+        <strong>[우체국 업로드 방법]</strong><br>
+        파일 불러오기 시 형식을 <br><strong>'텍스트(파이프로 분리)(*.txt)'</strong>로 선택하세요.<br><br>
+        보안 안내: 파일은 변환 즉시 삭제됩니다.
     </div>
 </div>
 
@@ -114,7 +115,6 @@
         if(!file) return alert("네이버에서 받은 엑셀 파일을 선택해주세요!");
         if(!pw) return alert("비밀번호를 입력해주세요!");
 
-        // 상태 표시
         submitBtn.disabled = true;
         submitBtn.innerText = "처리 중...";
         loading.style.display = "block";
@@ -135,9 +135,9 @@
                 const a = document.createElement('a');
                 a.href = url;
                 
-                // 오늘 날짜로 파일명 생성
                 const today = new Date().toISOString().slice(5, 10).replace('-', '');
-                a.download = `우체국_변환_${today}.xlsx`;
+                // 핵심 수정 사항: 확장자를 .txt로 변경
+                a.download = `우체국_업로드_${today}.txt`; 
                 
                 document.body.appendChild(a);
                 a.click();
@@ -150,7 +150,7 @@
             alert("서버 연결에 실패했습니다.");
         } finally {
             submitBtn.disabled = false;
-            submitBtn.innerText = "변환 및 다운로드";
+            submitBtn.innerText = "변환 및 TXT 다운로드";
             loading.style.display = "none";
         }
     }
