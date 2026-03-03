@@ -17,50 +17,39 @@ def convert():
             return jsonify({"error": "파일이 없습니다."}), 400
         
         file = request.files['file']
+        password = request.form.get('password', '').strip()
         
-        # 1. 비밀번호를 받을 때 인코딩 문제를 방지하기 위해 명시적으로 처리
-        password = request.form.get('password', '')
-        if not password:
-            return jsonify({"error": "비밀번호를 입력해주세요."}), 400
-        
-        # 문자열 양 끝의 공백만 제거 (영문 대소문자는 유지)
-        password = password.strip()
-        
+        # 1. 파일 데이터를 메모리에 로드
         file_data = file.read()
         input_buffer = io.BytesIO(file_data)
         decrypted_buffer = io.BytesIO()
 
-        # 2. 암호 해제 시도
+        # 2. 암호 해제 (숫자 비밀번호에 최적화)
         try:
             office_file = msoffcrypto.OfficeFile(input_buffer)
-            
-            # 영문 비밀번호의 경우 특정 인코딩에서 문제가 생길 수 있으므로 
-            # 라이브러리가 지원하는 기본 문자열 방식으로 전달
-            import hmac # 상단에 추가
-office_file.load_key(password=str(password).strip())
+            office_file.load_key(password=password)
             office_file.decrypt(decrypted_buffer)
             decrypted_buffer.seek(0)
         except Exception as e:
-            logging.error(f"Decryption failed: {str(e)}")
-            return jsonify({
-                "error": "비밀번호가 일치하지 않습니다.",
-                "details": "영문 대소문자를 다시 확인해주세요."
-            }), 403
+            return jsonify({"error": "비밀번호가 일치하지 않습니다.", "details": str(e)}), 403
 
         # 3. 엑셀 데이터 로드
         try:
-            # 해독된 버퍼를 읽을 때 엔진을 openpyxl로 고정
+            # 헤더 없이 전체 데이터를 읽어옵니다.
             df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None)
         except Exception as e:
             return jsonify({"error": "엑셀 읽기 실패", "details": str(e)}), 400
 
-        # 4. 데이터 시작점(헤더) 찾기
+        # 4. '수취인명'이 있는 진짜 헤더 행 찾기
         header_row_idx = 0
         for i, row in df_raw.head(20).iterrows():
-            if "수취인명" in [str(v).replace(" ", "") for v in row.values]:
+            # 행의 값들 중 '수취인명'이 포함되어 있는지 확인 (공백 제거 후 비교)
+            row_values = [str(v).replace(" ", "") for v in row.values]
+            if "수취인명" in row_values:
                 header_row_idx = i
                 break
         
+        # 헤더 아래부터 데이터로 설정
         df = df_raw.iloc[header_row_idx + 1:].copy()
         df.columns = df_raw.iloc[header_row_idx]
         df = df.reset_index(drop=True)
@@ -69,14 +58,15 @@ office_file.load_key(password=str(password).strip())
         if num_rows == 0:
             return jsonify({"error": "변환할 데이터가 없습니다."}), 400
 
-        # 5. 데이터 매핑 함수 (열 이름 기반)
-        def get_col(name):
-            # 실제 엑셀의 컬럼명에서 공백을 제거하고 비교
+        # 5. 안전하게 데이터를 가져오는 함수 (공백 무시)
+        def get_col(target_name):
+            target_clean = target_name.replace(" ", "")
             for real_col in df.columns:
-                if str(real_col).replace(" ", "") == name:
+                if str(real_col).replace(" ", "") == target_clean:
                     return df[real_col]
             return [""] * num_rows
 
+        # 6. 요청하신 1:1 매핑 규칙 적용
         mapping = {
             "받는 분": get_col("수취인명"),
             "우편번호": get_col("우편번호"),
@@ -95,7 +85,7 @@ office_file.load_key(password=str(password).strip())
         
         post_df = pd.DataFrame(mapping)
 
-        # 6. 파일 생성 및 반환
+        # 7. 엑셀 파일 생성 및 전송
         output_buffer = io.BytesIO()
         with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
             post_df.to_excel(writer, index=False)
@@ -105,9 +95,9 @@ office_file.load_key(password=str(password).strip())
             output_buffer,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name="post_office_converted.xlsx"
+            download_name=f"우체국_변환완료_{pd.Timestamp.now().strftime('%m%d')}.xlsx"
         )
 
     except Exception as e:
-        logging.error(f"Error: {str(e)}")
-        return jsonify({"error": f"변환 실패: {str(e)}"}), 500
+        logging.error(f"Server Error: {str(e)}")
+        return jsonify({"error": f"서버 오류: {str(e)}"}), 500
