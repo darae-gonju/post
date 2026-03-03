@@ -11,32 +11,33 @@ CORS(app)
 def convert():
     try:
         if 'file' not in request.files:
-            return jsonify({"error": "파일이 업로드되지 않았습니다."}), 400
+            return jsonify({"error": "파일이 없습니다."}), 400
         
         file = request.files['file']
-        password = request.form.get('password', '')
+        password = request.form.get('password', '') # 입력한 비번 그대로 가져옴
         
-        # 1. 파일을 메모리(BytesIO)에 담기
-        file_bytes = io.BytesIO(file.read())
+        # 1. 파일 데이터를 메모리에 안전하게 로드
+        file_content = file.read()
+        file_bytes = io.BytesIO(file_content)
         
         # 2. 암호 해제 시도
         decrypted_ptr = io.BytesIO()
         try:
             ms_file = msoffcrypto.OfficeFile(file_bytes)
-            ms_file.load_key(password=password) # 비밀번호 입력
+            # 사용자가 입력한 비밀번호를 '있는 그대로' 사용
+            ms_file.load_key(password=password)
             ms_file.decrypt(decrypted_ptr)
-            decrypted_ptr.seek(0) # 중요: 데이터를 읽기 위해 포인터를 맨 앞으로 이동
+            decrypted_ptr.seek(0) # 읽기 포인터 초기화
         except Exception as e:
-            print(f"Decryption Error: {e}")
-            return jsonify({"error": "비밀번호가 틀렸거나 암호화 형식이 맞지 않습니다."}), 403
+            # 실패 시 로그를 남기고 사용자에게 알림
+            print(f"암호 해제 에러: {str(e)}")
+            return jsonify({"error": "비밀번호가 일치하지 않습니다. 다시 확인해주세요."}), 403
         
         # 3. 데이터 읽기 및 변환
-        try:
-            df = pd.read_excel(decrypted_ptr)
-        except Exception as e:
-            return jsonify({"error": f"엑셀 읽기 실패: {str(e)}"}), 400
+        # engine='openpyxl'을 명시하여 최신 엑셀 형식 지원
+        df = pd.read_excel(decrypted_ptr, engine='openpyxl')
         
-        # 4. 우체국 양식 매핑 (컬럼명이 다를 경우를 대비해 get 메서드 사용)
+        # 4. 우체국 양식 매핑
         post_df = pd.DataFrame({
             "받는 분": df.get("수취인명", ""),
             "우편번호": df.get("우편번호", ""),
@@ -53,7 +54,7 @@ def convert():
             "분할접수 여부(Y/N)": "N"
         })
 
-        # 5. 결과 파일 생성
+        # 5. 결과 파일 생성 (메모리에서 즉시 처리)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             post_df.to_excel(writer, index=False)
@@ -67,9 +68,5 @@ def convert():
         )
 
     except Exception as e:
-        return jsonify({"error": f"서버 내부 오류: {str(e)}"}), 500
-
-    except Exception as e:
-        return jsonify({"error": f"서버 오류: {str(e)}"}), 500
-
-# 여기서 app.run()이나 handler 함수를 절대 넣지 마세요!
+        print(f"서버 내부 에러: {str(e)}")
+        return jsonify({"error": f"서버 오류가 발생했습니다: {str(e)}"}), 500
