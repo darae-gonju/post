@@ -10,52 +10,38 @@ CORS(app)
 
 logging.basicConfig(level=logging.INFO)
 
-# 보조 함수: 컬럼 데이터 추출
 def get_col_safe(df, name, n):
     target_clean = str(name).replace(" ", "")
     for c in df.columns:
         if str(c).replace(" ", "") == target_clean:
-            # nan 값은 빈 문자열로, 모든 값은 문자열로 변환 후 공백 제거
             return df[c].fillna("").astype(str).str.strip()
     return pd.Series([""] * n)
 
 @app.route('/api', methods=['POST'])
 def convert():
     try:
-        # 1. 파일 및 비밀번호 수신 확인
         if 'file' not in request.files:
             return jsonify({"error": "파일이 없습니다."}), 400
         
         file = request.files['file']
         password = request.form.get('password', '').strip()
         
-        if not password:
-            return jsonify({"error": "비밀번호를 입력해주세요."}), 400
-
-        # 2. 파일 읽기 및 복호화
-        file_data = file.read()
-        input_buffer = io.BytesIO(file_data)
+        # 1. 네이버 엑셀 암호 해제
+        input_buffer = io.BytesIO(file.read())
         decrypted_buffer = io.BytesIO()
-
         try:
             office_file = msoffcrypto.OfficeFile(input_buffer)
             office_file.load_key(password=password)
             office_file.decrypt(decrypted_buffer)
             decrypted_buffer.seek(0)
-        except Exception:
-            return jsonify({"error": "비밀번호가 틀렸거나 파일 해독에 실패했습니다."}), 403
+        except:
+            return jsonify({"error": "비밀번호가 틀렸습니다."}), 403
 
-        # 3. 엑셀 로드
-        try:
-            df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None, dtype=str)
-        except Exception as e:
-            return jsonify({"error": f"엑셀 읽기 실패: {str(e)}"}), 400
-
-        # 4. 네이버 헤더(수취인명) 찾기
+        # 2. 데이터 읽기
+        df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None, dtype=str)
         header_row_idx = -1
         for i, row in df_raw.head(30).iterrows():
-            row_values = [str(v).replace(" ", "") for v in row.values if pd.notna(v)]
-            if "수취인명" in row_values:
+            if "수취인명" in [str(v).replace(" ", "") for v in row.values if pd.notna(v)]:
                 header_row_idx = i
                 break
         
@@ -67,42 +53,49 @@ def convert():
         df = df.reset_index(drop=True)
         num_rows = len(df)
 
-        # 5. 데이터 정제 (우체국 텍스트 양식 7개 항목 순서)
+        # 3. 데이터 추출
         names = get_col_safe(df, "수취인명", num_rows)
         zips = get_col_safe(df, "우편번호", num_rows)
         addr1 = get_col_safe(df, "기본배송지", num_rows)
-        
-        # 상세주소 필수 처리 (비어있으면 마침표 입력)
-        addr2 = get_col_safe(df, "상세배송지", num_rows)
-        addr2 = addr2.apply(lambda x: "." if not x or x.strip() == "" else x)
-        
-        tel1 = get_col_safe(df, "수취인연락처2", num_rows) # 일반전화
-        tel2 = get_col_safe(df, "수취인연락처1", num_rows) # 휴대전화
-        
-        # 7번째 항목: 참조번호 혹은 상품명 (20자 제한)
+        addr2 = get_col_safe(df, "상세배송지", num_rows).apply(lambda x: "." if not x or x.strip() == "" else x)
+        tel_home = get_col_safe(df, "수취인연락처2", num_rows)   # 일반전화
+        tel_mobile = get_col_safe(df, "수취인연락처1", num_rows) # 휴대전화
         product = get_col_safe(df, "상품명", num_rows).str.slice(0, 20)
+        memo = get_col_safe(df, "배송메세지", num_rows)
 
-        # 6. 파이프(|)로 구분된 텍스트 내용 생성
+        # 4. 우체국 표준 17개 항목 파이프(|) 결합
         lines = []
         for i in range(num_rows):
-            # 형식: 성명|우편번호|주소|상세주소|일반전화|휴대전화|상품명
-            line = f"{names[i]}|{zips[i]}|{addr1[i]}|{addr2[i]}|{tel1[i]}|{tel2[i]}|{product[i]}"
-            lines.append(line)
+            row = [
+                names[i],               # 1: 받는 분
+                zips[i],                # 2: 우편번호
+                addr1[i],               # 3: 주소
+                addr2[i],               # 4: 상세주소
+                tel_home[i],            # 5: 일반전화
+                tel_mobile[i],          # 6: 휴대전화
+                "3",                    # 7: 중량 (정상 입력)
+                "80",                   # 8: 부피
+                "농/수/축산물(일반)",   # 9: 내용품코드 (정상 입력)
+                product[i],             # 10: 내용물 (상품명)
+                "미신청",               # 11: 배달방식
+                memo[i],                # 12: 배송시요청사항
+                "N",                    # 13: 분할접수 여부
+                "", "", "", ""          # 14~17: 빈칸
+            ]
+            lines.append("|".join(row))
         
         content = "\n".join(lines)
 
-        # 7. 텍스트 파일(TXT)로 전송
-        # cp949 인코딩은 윈도우 우체국 시스템 호환용입니다.
-        output_buffer = io.BytesIO(content.encode('cp949', errors='replace'))
-        output_buffer.seek(0)
+        # 5. TXT 파일 전송
+        output = io.BytesIO(content.encode('cp949', errors='replace'))
+        output.seek(0)
 
         return send_file(
-            output_buffer,
+            output,
             mimetype='text/plain',
             as_attachment=True,
-            download_name=f"post_office_upload_{pd.Timestamp.now().strftime('%m%d')}.txt"
+            download_name=f"post_office_upload.txt"
         )
 
     except Exception as e:
-        logging.exception("Conversion failed")
         return jsonify({"error": f"서버 오류: {str(e)}"}), 500
