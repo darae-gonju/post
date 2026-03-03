@@ -36,7 +36,8 @@ def convert():
             
             # 영문 비밀번호의 경우 특정 인코딩에서 문제가 생길 수 있으므로 
             # 라이브러리가 지원하는 기본 문자열 방식으로 전달
-            office_file.load_key(password=str(password))
+            import hmac # 상단에 추가
+office_file.load_key(password=str(password).strip())
             office_file.decrypt(decrypted_buffer)
             decrypted_buffer.seek(0)
         except Exception as e:
