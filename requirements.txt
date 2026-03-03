@@ -1,5 +1,5 @@
-pandas
-msoffcrypto-tool
-openpyxl
 flask
 flask-cors
+pandas
+msoffcrypto-tool
+openpyxl>=3.1.0
