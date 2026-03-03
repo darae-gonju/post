@@ -11,7 +11,6 @@ CORS(app)
 
 logging.basicConfig(level=logging.INFO)
 
-# 데이터 추출 및 정제 보조 함수
 def get_col_safe(df, name, n):
     target_clean = str(name).replace(" ", "")
     for c in df.columns:
@@ -19,10 +18,8 @@ def get_col_safe(df, name, n):
             return df[c].fillna("").astype(str).str.strip()
     return pd.Series([""] * n)
 
-# 특수기호 삭제 함수 (배송메시지용)
 def remove_special_chars(text):
     if not text: return ""
-    # 한글, 숫자, 영어, 공백만 남기고 모두 삭제
     return re.sub(r'[^가-힣a-zA-Z0-9\s]', '', str(text))
 
 @app.route('/api', methods=['POST'])
@@ -33,8 +30,9 @@ def convert():
         
         file = request.files['file']
         password = request.form.get('password', '').strip()
+        # 프론트에서 선택한 품목 카테고리 수신 (기본값 설정)
+        item_type = request.form.get('itemType', '농/수/축산물(일반)')
         
-        # 1. 네이버 엑셀 암호 해제
         input_buffer = io.BytesIO(file.read())
         decrypted_buffer = io.BytesIO()
         try:
@@ -45,7 +43,6 @@ def convert():
         except:
             return jsonify({"error": "비밀번호가 틀렸습니다."}), 403
 
-        # 2. 데이터 읽기
         df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None, dtype=str)
         header_row_idx = -1
         for i, row in df_raw.head(30).iterrows():
@@ -61,7 +58,6 @@ def convert():
         df = df.reset_index(drop=True)
         num_rows = len(df)
 
-        # 3. 데이터 추출 및 전화번호 분류 로직
         names = get_col_safe(df, "수취인명", num_rows)
         zips = get_col_safe(df, "우편번호", num_rows)
         addr1 = get_col_safe(df, "기본배송지", num_rows)
@@ -70,44 +66,29 @@ def convert():
         raw_tel1 = get_col_safe(df, "수취인연락처1", num_rows)
         raw_tel2 = get_col_safe(df, "수취인연락처2", num_rows)
 
-        final_tel_home = []   # 5열: 일반전화
-        final_tel_mobile = [] # 6열: 휴대전화(010, 050 포함)
-
-        # 휴대폰/안심번호 판단 기준
+        final_tel_home = []
+        final_tel_mobile = []
         mobile_prefixes = ("010", "050")
 
         for i in range(num_rows):
             t1 = raw_tel1[i].replace("-", "").strip()
             t2 = raw_tel2[i].replace("-", "").strip()
-            
-            mobile = ""
-            home = ""
+            mobile = ""; home = ""
 
-            # t1이 휴대폰/안심번호인 경우
             if t1.startswith(mobile_prefixes):
                 mobile = t1
-                # t2가 휴대폰/안심번호가 아니면 일반전화로 분류
-                if t2 and not t2.startswith(mobile_prefixes):
-                    home = t2
-            # t2가 휴대폰/안심번호인 경우 (t1은 아닌 상황)
+                if t2 and not t2.startswith(mobile_prefixes): home = t2
             elif t2.startswith(mobile_prefixes):
                 mobile = t2
-                if t1 and not t1.startswith(mobile_prefixes):
-                    home = t1
+                if t1 and not t1.startswith(mobile_prefixes): home = t1
             else:
-                # 둘 다 일반번호인 경우 t1을 우선 배치
                 home = t1
-                mobile = ""
-
+            
             final_tel_home.append(home)
             final_tel_mobile.append(mobile)
         
-        product = get_col_safe(df, "상품명", num_rows).str.slice(0, 20)
-        
-        # 12행 배송메세지: 특수기호 삭제
         memo = get_col_safe(df, "배송메세지", num_rows).apply(remove_special_chars)
 
-        # 4. 우체국 표준 17개 항목 파이프(|) 결합
         lines = []
         for i in range(num_rows):
             row = [
@@ -115,12 +96,12 @@ def convert():
                 zips[i],                # 2: 우편번호
                 addr1[i],               # 3: 주소
                 addr2[i],               # 4: 상세주소
-                final_tel_home[i],      # 5: 일반전화 (010, 050 절대 없음)
-                final_tel_mobile[i],    # 6: 휴대전화 (010, 050만 들어감)
+                final_tel_home[i],      # 5: 일반전화
+                final_tel_mobile[i],    # 6: 휴대전화
                 "3",                    # 7: 중량
                 "80",                   # 8: 부피
-                "농/수/축산물(일반)",   # 9: 내용품코드
-                product[i],             # 10: 내용물 (상품명)
+                item_type,              # 9: 내용품코드 (선택 품목)
+                item_type,              # 10: 내용물 (상품명 대신 품목 입력)
                 "미신청",               # 11: 배달방식
                 memo[i],                # 12: 배송시요청사항
                 "N",                    # 13: 분할접수 여부
@@ -129,8 +110,6 @@ def convert():
             lines.append("|".join(row))
         
         content = "\n".join(lines)
-
-        # 5. TXT 파일 전송 (cp949 인코딩)
         output = io.BytesIO(content.encode('cp949', errors='replace'))
         output.seek(0)
 
@@ -138,13 +117,8 @@ def convert():
             output,
             mimetype='text/plain',
             as_attachment=True,
-            download_name=f"post_upload_final.txt"
+            download_name=f"post_upload_{pd.Timestamp.now().strftime('%m%d')}.txt"
         )
-
-    except Exception as e:
-        return jsonify({"error": f"서버 오류: {str(e)}"}), 500
-    except Exception as e:
-        return jsonify({"error": f"서버 오류: {str(e)}"}), 500
 
     except Exception as e:
         return jsonify({"error": f"서버 오류: {str(e)}"}), 500
