@@ -32,16 +32,16 @@ def convert():
         except Exception as e:
             return jsonify({"error": "비밀번호가 일치하지 않습니다.", "details": str(e)}), 403
 
-        # 2. 엑셀 로드 (데이터 타입을 문자열로 고정하여 0 누락 방지)
+        # 2. 엑셀 로드 (모든 데이터를 일단 문자열로 읽음)
         try:
             df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None, dtype=str)
         except Exception as e:
             return jsonify({"error": "엑셀 읽기 실패", "details": str(e)}), 400
 
-        # 3. 헤더 행 찾기
+        # 3. '수취인명' 행 찾기
         header_row_idx = 0
         for i, row in df_raw.head(20).iterrows():
-            row_values = [str(v).replace(" ", "") for v in row.values]
+            row_values = [str(v).replace(" ", "") for v in row.values if pd.notna(v)]
             if "수취인명" in row_values:
                 header_row_idx = i
                 break
@@ -54,52 +54,66 @@ def convert():
         if num_rows == 0:
             return jsonify({"error": "변환할 데이터가 없습니다."}), 400
 
-        # 4. 데이터 추출 함수
+        # 4. 데이터 추출 함수 (빈칸은 공백으로, 모든 값은 문자열로)
         def get_col(target_name):
             target_clean = target_name.replace(" ", "")
             for real_col in df.columns:
                 if str(real_col).replace(" ", "") == target_clean:
-                    return df[real_col].fillna("").astype(str)
+                    return df[real_col].fillna("").astype(str).tolist()
             return [""] * num_rows
 
-        # 5. [우체국 템플릿 1:1 매칭] 토씨 하나 안 틀리게 이름 설정
-        mapping = {
-            "받는 분": get_col("수취인명"),
-            "우편번호": get_col("우편번호"),
-            "주소(시도+시군구+도로명+건물번호)": get_col("기본배송지"),
-            "상세주소(동, 호수, 洞명칭, 아파트, 건물명 등)": get_col("상세배송지"),
-            "일반전화(02-1234-5678)": get_col("수취인연락처2"),
-            "휴대전화(010-1234-5678)": get_col("수취인연락처1"),
-            "중량(kg)": ["3"] * num_rows,
-            "부피(cm)=가로+세로+높이": ["80"] * num_rows,
-            "내용품코드": ["농/수/축산물(일반)"] * num_rows,
-            "내용물": get_col("상품명"),
-            "배달방식": ["미신청"] * num_rows,
-            "배송시요청사항": get_col("배송메세지"),
-            "분할접수 여부(Y/N)": ["N"] * num_rows,
-            "분할접수 첫번째 중량(kg)": [""] * num_rows,
-            "분할접수 첫번째 부피(cm)": [""] * num_rows,
-            "분할접수 두번째 중량(kg)": [""] * num_rows,
-            "분할접수 두번째 부피(cm)": [""] * num_rows
-        }
+        # 5. [우체국 최신 17개 컬럼] 순서대로 리스트 생성
+        # 제목 없이 데이터만 넣기 위해 리스트의 리스트(행 단위)로 재구성합니다.
+        final_data = []
         
-        post_df = pd.DataFrame(mapping)
+        names = get_col("수취인명")
+        zips = get_col("우편번호")
+        addr1 = get_col("기본배송지")
+        addr2 = get_col("상세배송지")
+        tel1 = get_col("수취인연락처2")
+        tel2 = get_col("수취인연락처1")
+        items = get_col("상품명")
+        msg = get_col("배송메세지")
 
-        # 6. 파일 생성
+        for i in range(num_rows):
+            row = [
+                names[i],       # 0: 받는 분
+                zips[i],        # 1: 우편번호
+                addr1[i],       # 2: 주소
+                addr2[i],       # 3: 상세주소
+                tel1[i],        # 4: 일반전화
+                tel2[i],        # 5: 휴대전화
+                "3",            # 6: 중량
+                "80",           # 7: 부피
+                "농/수/축산물(일반)", # 8: 내용품코드
+                items[i],       # 9: 내용물
+                "미신청",       # 10: 배달방식 (대면/비대면/미신청 중 미신청)
+                msg[i],         # 11: 배송시요청사항
+                "N",            # 12: 분할접수 여부
+                "",             # 13: 분할1 중량
+                "",             # 14: 분할1 부피
+                "",             # 15: 분할2 중량
+                ""              # 16: 분할2 부피
+            ]
+            final_data.append(row)
+        
+        # 제목 줄 없는 데이터프레임 생성
+        post_df = pd.DataFrame(final_data)
+
+        # 6. 파일 생성 (header=False로 1행 제목 제거)
         output_buffer = io.BytesIO()
-        # xlsx가 아닌 구형 xls를 요구하는 경우가 있으나, 일단 최신 xlsx로 작성합니다.
         with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-            # index=False는 필수, 일단 header=True(제목 포함)로 보냅니다.
-            post_df.to_excel(writer, index=False, header=True)
+            # index=False, header=False로 오직 데이터만 출력
+            post_df.to_excel(writer, index=False, header=False)
         output_buffer.seek(0)
 
         return send_file(
             output_buffer,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name=f"post_upload_{pd.Timestamp.now().strftime('%m%d_%H%M')}.xlsx"
+            download_name=f"우체국_업로드용_{pd.Timestamp.now().strftime('%m%d_%H%M')}.xlsx"
         )
 
     except Exception as e:
-        logging.error(f"Server Error: {str(e)}")
-        return jsonify({"error": f"서버 오류: {str(e)}"}), 500
+        logging.error(f"Error: {str(e)}")
+        return jsonify({"error": f"변환 실패: {str(e)}"}), 500
