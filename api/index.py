@@ -19,7 +19,7 @@ def get_col_safe(df, name, n):
             return df[c].fillna("").astype(str).str.strip()
     return pd.Series([""] * n)
 
-# 특수기호 삭제 함수
+# 특수기호 삭제 함수 (배송메시지용)
 def remove_special_chars(text):
     if not text: return ""
     # 한글, 숫자, 영어, 공백만 남기고 모두 삭제
@@ -61,43 +61,51 @@ def convert():
         df = df.reset_index(drop=True)
         num_rows = len(df)
 
-        # 3. 데이터 추출 및 전화번호 로직 강화
+        # 3. 데이터 추출 및 전화번호 분류 로직
         names = get_col_safe(df, "수취인명", num_rows)
         zips = get_col_safe(df, "우편번호", num_rows)
         addr1 = get_col_safe(df, "기본배송지", num_rows)
         addr2 = get_col_safe(df, "상세배송지", num_rows).apply(lambda x: "." if not x or x.strip() == "" else x)
         
-        # 네이버 연락처1, 연락처2 수집
         raw_tel1 = get_col_safe(df, "수취인연락처1", num_rows)
         raw_tel2 = get_col_safe(df, "수취인연락처2", num_rows)
 
         final_tel_home = []   # 5열: 일반전화
-        final_tel_mobile = [] # 6열: 휴대전화
+        final_tel_mobile = [] # 6열: 휴대전화(010, 050 포함)
+
+        # 휴대폰/안심번호 판단 기준
+        mobile_prefixes = ("010", "050")
 
         for i in range(num_rows):
             t1 = raw_tel1[i].replace("-", "").strip()
             t2 = raw_tel2[i].replace("-", "").strip()
             
-            # 휴대폰 번호(010) 추출 로직
-            if t1.startswith("010"):
+            mobile = ""
+            home = ""
+
+            # t1이 휴대폰/안심번호인 경우
+            if t1.startswith(mobile_prefixes):
                 mobile = t1
-                home = t2 if not t2.startswith("010") else ""
-            elif t2.startswith("010"):
+                # t2가 휴대폰/안심번호가 아니면 일반전화로 분류
+                if t2 and not t2.startswith(mobile_prefixes):
+                    home = t2
+            # t2가 휴대폰/안심번호인 경우 (t1은 아닌 상황)
+            elif t2.startswith(mobile_prefixes):
                 mobile = t2
-                home = t1 if not t1.startswith("010") else ""
+                if t1 and not t1.startswith(mobile_prefixes):
+                    home = t1
             else:
-                # 둘 다 010이 아닌 경우
-                mobile = ""
+                # 둘 다 일반번호인 경우 t1을 우선 배치
                 home = t1
-            
+                mobile = ""
+
             final_tel_home.append(home)
             final_tel_mobile.append(mobile)
         
         product = get_col_safe(df, "상품명", num_rows).str.slice(0, 20)
         
         # 12행 배송메세지: 특수기호 삭제
-        memo = get_col_safe(df, "배송메세지", num_rows)
-        memo = memo.apply(remove_special_chars)
+        memo = get_col_safe(df, "배송메세지", num_rows).apply(remove_special_chars)
 
         # 4. 우체국 표준 17개 항목 파이프(|) 결합
         lines = []
@@ -107,14 +115,14 @@ def convert():
                 zips[i],                # 2: 우편번호
                 addr1[i],               # 3: 주소
                 addr2[i],               # 4: 상세주소
-                final_tel_home[i],      # 5: 일반전화 (010 절대 없음)
-                final_tel_mobile[i],    # 6: 휴대전화 (010만 들어감)
+                final_tel_home[i],      # 5: 일반전화 (010, 050 절대 없음)
+                final_tel_mobile[i],    # 6: 휴대전화 (010, 050만 들어감)
                 "3",                    # 7: 중량
                 "80",                   # 8: 부피
                 "농/수/축산물(일반)",   # 9: 내용품코드
                 product[i],             # 10: 내용물 (상품명)
                 "미신청",               # 11: 배달방식
-                memo[i],                # 12: 배송시요청사항 (특수기호 제거)
+                memo[i],                # 12: 배송시요청사항
                 "N",                    # 13: 분할접수 여부
                 "", "", "", ""          # 14~17: 빈칸
             ]
@@ -122,7 +130,7 @@ def convert():
         
         content = "\n".join(lines)
 
-        # 5. TXT 파일 전송
+        # 5. TXT 파일 전송 (cp949 인코딩)
         output = io.BytesIO(content.encode('cp949', errors='replace'))
         output.seek(0)
 
@@ -130,9 +138,11 @@ def convert():
             output,
             mimetype='text/plain',
             as_attachment=True,
-            download_name=f"post_office_fixed.txt"
+            download_name=f"post_upload_final.txt"
         )
 
+    except Exception as e:
+        return jsonify({"error": f"서버 오류: {str(e)}"}), 500
     except Exception as e:
         return jsonify({"error": f"서버 오류: {str(e)}"}), 500
 
