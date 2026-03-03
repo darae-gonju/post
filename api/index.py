@@ -65,52 +65,35 @@ def convert():
         df = df.reset_index(drop=True)
         num_rows = len(df)
 
-        # 4. 상세주소 필수값 보정 (공백 한 칸이라도 넣어야 에러가 안 납니다)
-        addr_detail = get_col_safe(df, "상세배송지", num_rows)
-        addr_detail = addr_detail.apply(lambda x: " " if not x or x.strip() == "" else x)
+        # 4. 데이터 추출 및 정제
+        names = get_col_safe(df, "수취인명", num_rows)
+        zips = get_col_safe(df, "우편번호", num_rows)
+        addr1 = get_col_safe(df, "기본배송지", num_rows)
+        
+        # 상세주소 필수 처리: 비어있으면 마침표(.)라도 넣어서 에러 방지
+        addr2 = get_col_safe(df, "상세배송지", num_rows)
+        addr2 = addr2.apply(lambda x: "." if not x or x.strip() == "" else x)
+        
+        tel1 = get_col_safe(df, "수취인연락처2", num_rows) # 일반전화
+        tel2 = get_col_safe(df, "수취인연락처1", num_rows) # 휴대전화
+        product = get_col_safe(df, "상품명", num_rows).str.slice(0, 15) # 7번째 칸용
 
-        # 5. [중요] 보내주신 템플릿과 100% 동일한 17개 컬럼 및 제목 설정
-        mapping = {
-            "받는 분": get_col_safe(df, "수취인명", num_rows),
-            "우편번호": get_col_safe(df, "우편번호", num_rows),
-            "주소(시도+시군구+도로명+건물번호)": get_col_safe(df, "기본배송지", num_rows),
-            "상세주소(동, 호수, 洞명칭, 아파트, 건물명 등)": addr_detail,
-            "일반전화(02-1234-5678)": get_col_safe(df, "수취인연락처2", num_rows),
-            "휴대전화(010-1234-5678)": get_col_safe(df, "수취인연락처1", num_rows),
-            "중량(kg)": ["3"] * num_rows,
-            "부피(cm)=가로+세로+높이": ["80"] * num_rows,
-            "내용품코드": ["농/수/축산물(일반)"] * num_rows,
-            "내용물": get_col_safe(df, "상품명", num_rows).str.slice(0, 20),
-            "배달방식": ["미신청"] * num_rows,
-            "배송시요청사항": get_col_safe(df, "배송메세지", num_rows),
-            "분할접수 여부(Y/N)": ["N"] * num_rows,
-            "분할접수 첫번째 중량(kg)": [""] * num_rows,
-            "분할접수 첫번째 부피(cm)": [""] * num_rows,
-            "분할접수 두번째 중량(kg)": [""] * num_rows,
-            "분할접수 두번째 부피(cm)": [""] * num_rows
-        }
+        # 5. 파이프(|) 구분 텍스트 데이터 생성
+        # 순서: 성명|우편번호|주소|상세주소|일반전화|휴대전화|참조번호(상품명)
+        lines = []
+        for i in range(num_rows):
+            line = f"{names[i]}|{zips[i]}|{addr1[i]}|{addr2[i]}|{tel1[i]}|{tel2[i]}|{product[i]}"
+            lines.append(line)
+        
+        content = "\n".join(lines)
 
-        final_df = pd.DataFrame(mapping)
-
-        # 6. 엑셀 파일 생성
-        output_buffer = io.BytesIO()
-        with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-            # 템플릿 그대로 제목 줄 포함(header=True)
-            final_df.to_excel(writer, index=False, header=True, sheet_name='Sheet1')
-            
-            # 모든 셀을 텍스트 형식으로 고정
-            ws = writer.sheets['Sheet1']
-            for r in range(1, num_rows + 2):
-                for c in range(1, 18):
-                    ws.cell(row=r, column=c).number_format = '@'
-                    
+        # 6. 텍스트 파일로 전송
+        output_buffer = io.BytesIO(content.encode('cp949', errors='replace')) # 우체국 시스템용 인코딩
         output_buffer.seek(0)
 
         return send_file(
             output_buffer,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=f"우체국_양식일치_{pd.Timestamp.now().strftime('%m%d')}.xlsx"
+            mimetype='text
         )
 
     except Exception as e:
