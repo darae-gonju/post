@@ -4,6 +4,7 @@ import msoffcrypto
 import pandas as pd
 import io
 import logging
+import re
 
 app = Flask(__name__)
 CORS(app)
@@ -30,15 +31,12 @@ def convert():
             office_file.decrypt(decrypted_buffer)
             decrypted_buffer.seek(0)
         except Exception as e:
-            return jsonify({"error": "비밀번호가 일치하지 않습니다.", "details": str(e)}), 403
+            return jsonify({"error": "비밀번호가 일치하지 않습니다."}), 403
 
-        # 2. 엑셀 로드 (모든 데이터를 일단 문자열로 읽음)
-        try:
-            df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None, dtype=str)
-        except Exception as e:
-            return jsonify({"error": "엑셀 읽기 실패", "details": str(e)}), 400
+        # 2. 엑셀 로드 (dtype=str로 모든 0 누락 방지)
+        df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None, dtype=str)
 
-        # 3. '수취인명' 행 찾기
+        # 3. 헤더 탐색
         header_row_idx = 0
         for i, row in df_raw.head(20).iterrows():
             row_values = [str(v).replace(" ", "") for v in row.values if pd.notna(v)]
@@ -50,61 +48,60 @@ def convert():
         df.columns = df_raw.iloc[header_row_idx]
         df = df.reset_index(drop=True)
 
-        num_rows = len(df)
-        if num_rows == 0:
-            return jsonify({"error": "변환할 데이터가 없습니다."}), 400
-
-        # 4. 데이터 추출 함수 (빈칸은 공백으로, 모든 값은 문자열로)
-        def get_col(target_name):
+        # 4. 데이터 정제 함수 (특수문자 및 공백 정리)
+        def clean_val(target_name):
             target_clean = target_name.replace(" ", "")
             for real_col in df.columns:
                 if str(real_col).replace(" ", "") == target_clean:
-                    return df[real_col].fillna("").astype(str).tolist()
-            return [""] * num_rows
+                    # NaN 처리 후 양 끝 공백 제거, 문자열 강제 변환
+                    return df[real_col].fillna("").apply(lambda x: str(x).strip()).tolist()
+            return [""] * len(df)
 
-        # 5. [우체국 최신 17개 컬럼] 순서대로 리스트 생성
-        # 제목 없이 데이터만 넣기 위해 리스트의 리스트(행 단위)로 재구성합니다.
-        final_data = []
-        
-        names = get_col("수취인명")
-        zips = get_col("우편번호")
-        addr1 = get_col("기본배송지")
-        addr2 = get_col("상세배송지")
-        tel1 = get_col("수취인연락처2")
-        tel2 = get_col("수취인연락처1")
-        items = get_col("상품명")
-        msg = get_col("배송메세지")
+        num_rows = len(df)
+        names = clean_val("수취인명")
+        zips = clean_val("우편번호")
+        addr1 = clean_val("기본배송지")
+        addr2 = clean_val("상세배송지")
+        tel1 = clean_val("수취인연락처2")
+        tel2 = clean_val("수취인연락처1")
+        products = clean_val("상품명")
+        messages = clean_val("배송메세지")
 
+        # 5. 우체국 17개 컬럼 규격에 맞춰 행 생성
+        final_rows = []
         for i in range(num_rows):
             row = [
-                names[i],       # 0: 받는 분
-                zips[i],        # 1: 우편번호
-                addr1[i],       # 2: 주소
-                addr2[i],       # 3: 상세주소
-                tel1[i],        # 4: 일반전화
-                tel2[i],        # 5: 휴대전화
-                "3",            # 6: 중량
-                "80",           # 7: 부피
-                "농/수/축산물(일반)", # 8: 내용품코드
-                items[i],       # 9: 내용물
-                "미신청",       # 10: 배달방식 (대면/비대면/미신청 중 미신청)
-                msg[i],         # 11: 배송시요청사항
-                "N",            # 12: 분할접수 여부
-                "",             # 13: 분할1 중량
-                "",             # 14: 분할1 부피
-                "",             # 15: 분할2 중량
-                ""              # 16: 분할2 부피
+                names[i],           # 1: 받는 분
+                zips[i],            # 2: 우편번호 (0 누락 방지됨)
+                addr1[i],           # 3: 주소
+                addr2[i],           # 4: 상세주소
+                tel1[i],            # 5: 일반전화
+                tel2[i],            # 6: 휴대전화
+                "3",                # 7: 중량 (표준값)
+                "80",               # 8: 부피 (표준값)
+                "농/수/축산물(일반)",     # 9: 내용품코드
+                products[i][:20],   # 10: 내용물 (글자수 제한 대비 20자로 자름)
+                "미신청",           # 11: 배달방식 (미신청)
+                messages[i],        # 12: 배송시요청사항
+                "N",                # 13: 분할접수 여부
+                "", "", "", ""      # 14~17: 분할접수 관련 빈칸
             ]
-            final_data.append(row)
-        
-        # 제목 줄 없는 데이터프레임 생성
-        post_df = pd.DataFrame(final_data)
+            final_rows.append(row)
 
-        # 6. 파일 생성 (header=False로 1행 제목 제거)
+        post_df = pd.DataFrame(final_rows)
+
+        # 6. 파일 생성 (우체국 표준에 맞춘 텍스트 전용 저장)
         output_buffer = io.BytesIO()
         with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-            # index=False, header=False로 오직 데이터만 출력
+            # 제목(header) 없이 데이터만 출력
             post_df.to_excel(writer, index=False, header=False)
+            
+            # 모든 셀을 '텍스트' 형식으로 강제 지정하기 위한 워크시트 접근
+            worksheet = writer.sheets['Sheet1']
+            for i in range(len(final_rows)):
+                for j in range(17):
+                    worksheet.cell(row=i+1, column=j+1).number_format = '@'
+
         output_buffer.seek(0)
 
         return send_file(
@@ -116,4 +113,4 @@ def convert():
 
     except Exception as e:
         logging.error(f"Error: {str(e)}")
-        return jsonify({"error": f"변환 실패: {str(e)}"}), 500
+        return jsonify({"error": "데이터 변환 중 오류가 발생했습니다."}), 500
