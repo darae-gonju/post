@@ -120,4 +120,41 @@
         loading.style.display = "block";
 
         const formData = new FormData();
-        formData.append
+        formData.append('file', file);
+        formData.append('password', pw);
+
+        try {
+            const res = await fetch('/api', { 
+                method: 'POST', 
+                body: formData 
+            });
+
+            if(res.ok) {
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                // 오늘 날짜로 파일명 생성
+                const today = new Date().toISOString().slice(5, 10).replace('-', '');
+                a.download = `우체국_변환_${today}.xlsx`;
+                
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } else {
+                const errorData = await res.json();
+                alert("오류: " + (errorData.error || "비밀번호를 확인해주세요."));
+            }
+        } catch (err) {
+            alert("서버 연결에 실패했습니다.");
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerText = "변환 및 다운로드";
+            loading.style.display = "none";
+        }
+    }
+</script>
+
+</body>
+</html>
