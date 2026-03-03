@@ -32,9 +32,9 @@ def convert():
         except Exception as e:
             return jsonify({"error": "비밀번호가 일치하지 않습니다.", "details": str(e)}), 403
 
-        # 2. 엑셀 로드
+        # 2. 엑셀 로드 (데이터 타입을 문자열로 고정하여 0 누락 방지)
         try:
-            df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None)
+            df_raw = pd.read_excel(decrypted_buffer, engine='openpyxl', header=None, dtype=str)
         except Exception as e:
             return jsonify({"error": "엑셀 읽기 실패", "details": str(e)}), 400
 
@@ -59,10 +59,10 @@ def convert():
             target_clean = target_name.replace(" ", "")
             for real_col in df.columns:
                 if str(real_col).replace(" ", "") == target_clean:
-                    return df[real_col]
+                    return df[real_col].fillna("").astype(str)
             return [""] * num_rows
 
-        # 5. [최신 17개 컬럼 매핑] 배달방식: 미신청 적용
+        # 5. [우체국 템플릿 1:1 매칭] 토씨 하나 안 틀리게 이름 설정
         mapping = {
             "받는 분": get_col("수취인명"),
             "우편번호": get_col("우편번호"),
@@ -70,8 +70,8 @@ def convert():
             "상세주소(동, 호수, 洞명칭, 아파트, 건물명 등)": get_col("상세배송지"),
             "일반전화(02-1234-5678)": get_col("수취인연락처2"),
             "휴대전화(010-1234-5678)": get_col("수취인연락처1"),
-            "중량(kg)": [3] * num_rows,
-            "부피(cm)=가로+세로+높이": [80] * num_rows,
+            "중량(kg)": ["3"] * num_rows,
+            "부피(cm)=가로+세로+높이": ["80"] * num_rows,
             "내용품코드": ["농/수/축산물(일반)"] * num_rows,
             "내용물": get_col("상품명"),
             "배달방식": ["미신청"] * num_rows,
@@ -85,17 +85,19 @@ def convert():
         
         post_df = pd.DataFrame(mapping)
 
-        # 6. 파일 생성 (header=False 옵션 추가로 1행 제거)
+        # 6. 파일 생성
         output_buffer = io.BytesIO()
+        # xlsx가 아닌 구형 xls를 요구하는 경우가 있으나, 일단 최신 xlsx로 작성합니다.
         with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-            post_df.to_excel(writer, index=False, header=False) # 이 부분이 핵심입니다.
+            # index=False는 필수, 일단 header=True(제목 포함)로 보냅니다.
+            post_df.to_excel(writer, index=False, header=True)
         output_buffer.seek(0)
 
         return send_file(
             output_buffer,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name=f"우체국_데이터전용_{pd.Timestamp.now().strftime('%m%d')}.xlsx"
+            download_name=f"post_upload_{pd.Timestamp.now().strftime('%m%d_%H%M')}.xlsx"
         )
 
     except Exception as e:
