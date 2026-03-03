@@ -85,17 +85,17 @@ def convert():
         
         post_df = pd.DataFrame(mapping)
 
-        # 6. 파일 생성
+        # 6. 파일 생성 (header=False 옵션 추가로 1행 제거)
         output_buffer = io.BytesIO()
         with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-            post_df.to_excel(writer, index=False)
+            post_df.to_excel(writer, index=False, header=False) # 이 부분이 핵심입니다.
         output_buffer.seek(0)
 
         return send_file(
             output_buffer,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name=f"우체국_최신양식_{pd.Timestamp.now().strftime('%m%d')}.xlsx"
+            download_name=f"우체국_데이터전용_{pd.Timestamp.now().strftime('%m%d')}.xlsx"
         )
 
     except Exception as e:
